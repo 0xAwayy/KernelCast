@@ -486,7 +486,7 @@ def local_type_exists(type_name):
             return True
     return False
 
-def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses, depth = 0):
+def handle_super_class(class_dict, super_class_obj, mbrs_struct):
     offset = 0
     if super_class_obj:
         super_class_name = super_class_obj.getName()
@@ -520,9 +520,6 @@ def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasse
             print("No parent class!")
 
         
-        #super_super_class_obj = class_dict.get(parent_class_name)
-        #if super_super_class_obj:
-        #    handle_super_class(class_dict, super_super_class_obj, mbrs_struct, IOKitBaseClasses, depth+1)
 
         # Calculate the padding size
         child_sz = super_class_obj.classSize
@@ -533,9 +530,6 @@ def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasse
             padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", offset, idc.FF_BYTE, None, 1)
             padding_var = idaapi.add_struc_member(mbrs_struct, "padding", offset+1, idc.FF_BYTE, None, adding_size)
             padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", 8 + adding_size, idc.FF_BYTE, None, 1)
-
-        #if depth == 1:
-        #    return
 
 
 def check_type(type_name):
@@ -591,20 +585,8 @@ def create_structs(class_dict, inherits_dict):
                     true_addr+=8
                 vtab_size[vtab_name]-=4
             print("\n"*30)
-    """
+
     for key in class_dict:
-        #struct_name = key.replace("'", " ").split(" ")[2]
-        #struct_name = class_dict[key].getName()[2:].replace("'","")
-        struct_name = class_dict[key].getName().replace("'", "").replace("`", "")
-        if struct_name.startswith("vtable for"):
-            struct_name = struct_name[10:]
-        add_struc(-1, struct_name, False)
-        add_struc(-1, struct_name+"_vtbl", False)
-        add_struc(-1, struct_name+"_mbrs", False)
-    """
-    for key in class_dict:
-        #if key not in list(class_dict.keys()):
-        #    continue
         prev_defined.append(key)
         curr_members = {}
         offset = 16
@@ -668,17 +650,9 @@ def create_structs(class_dict, inherits_dict):
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
             local_type_details = f"struct {struct_name};"
-            #type_decl = idaapi.parse_decl(tinfo, til, local_type_details, ida_typeinf.PT_TYP)
             index = idc.set_local_type(-1, local_type_details, ida_typeinf.PT_TYP)
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
-            #local_type_details = f"struct {struct_name}Mbrs;"
-            #idaapi.parse_decl(tinfo, til, local_type_details, ida_typeinf.PT_TYP)
-            #idc.set_local_type(-1, local_type_details, ida_typeinf.PT_TYP)
-            #Problems I need to solve
-            #Duplicate Names of Member Vars/Duplicate Types
-            #C++ Type Parsing using Siguzas method he told me
-            #Objective C somehow being in the fucking kernel
             add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
             struct_member = idaapi.get_member_by_name(struc, "thisOffset") 
             tinfo = idaapi.tinfo_t()
@@ -786,13 +760,6 @@ def create_structs(class_dict, inherits_dict):
             print("Struct name: ",struct_name)
             idaapi.parse_decl(tinfoo, idaapi.cvar.idati, struc_member_name, idaapi.PT_VAR)
             idaapi.set_member_tinfo(class_struc, struc_mem, 0, tinfoo, idaapi.TINFO_DEFINITE)
-            print("Here One")
-            #struc_mem = idaapi.get_member_by_name(class_struc, "m")
-            #struc_member_name = struct_name+"_mbrs m;"
-            #tinfoo = idaapi.tinfo_t()
-            #idaapi.parse_decl(tinfoo, idaapi.cvar.idati, struc_member_name, idaapi.PT_VAR)
-            #idaapi.set_member_tinfo(class_struc, struc_mem, 8, tinfoo, idaapi.TINFO_DEFINITE)
-            #mbrs_size = vtab_size[key] #if "<" not in struct_name else vtab_size["`vtable for'"+struct_name.replace("_vtbl","")[0:struct_name.find("<")]] 
             mbrs_size = class_dict[struct_name].getSize() if struct_name in list(class_dict.keys()) else 200
             idaapi.add_struc_member(class_struc, "mbrs", 8, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
@@ -804,12 +771,9 @@ def create_structs(class_dict, inherits_dict):
             #idaapi.parse_decl(type_info, idaapi.cvar.idati, member_name, idaapi.PT_TYP)
             idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
             print("Member class size", mbrs_size)
-            #if struct_name in list(class_dict.keys()) or demangle_name(get_name(class_dict[struct_name].getSuperClass()),idc.get_inf_attr(idc.INF_LONG_DN)) in list(class_dict.keys()): 
             if super_class_obj != "" and super_class_obj != None: 
                handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses) 
         for key in class_dict:
-            #if key not in list(class_dict.keys()):
-            #    continue
             if key in prev_defined:
                 continue
             curr_members = {}
@@ -864,9 +828,8 @@ def create_structs(class_dict, inherits_dict):
                 #idaapi.parse_decl(type_info, idaapi.cvar.idati, member_name, idaapi.PT_TYP)
                 idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
                 print("Member class size", mbrs_size)
-                #if struct_name in list(class_dict.keys()) or demangle_name(get_name(class_dict[struct_name].getSuperClass()),idc.get_inf_attr(idc.INF_LONG_DN)) in list(class_dict.keys()): 
                 if super_class_obj != "" and super_class_obj != None: 
-                    handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses) 
+                    handle_super_class(class_dict, super_class_obj, mbrs_struct) 
 
             else:
                 print(f"[+] VTable Name: {key}\n[+] Stuff In The Dictionary ig lol: {vtab_decls[key]}")
@@ -965,7 +928,6 @@ def create_structs(class_dict, inherits_dict):
                                     temp_param = temp_param.replace("*","")
                                 local_type_details = f"struct {temp_param};"
                                 print("Local Type: ", local_type_details)
-                                #type_decl = idaapi.parse_decl(tinfo, til, local_type_details, ida_typeinf.PT_TYP)
                                 index = idc.set_local_type(-1, local_type_details, idaapi.PT_TYP)
                                 print(f"Local Type: {local_type_details}\nIndex: {index} << if this is 0 you fucked up </3")
                                 defined_types.append(temp_param)
@@ -992,13 +954,6 @@ def create_structs(class_dict, inherits_dict):
                 print("Struct name: ",struct_name)
                 idaapi.parse_decl(tinfoo, idaapi.cvar.idati, struc_member_name, idaapi.PT_VAR)
                 idaapi.set_member_tinfo(class_struc, struc_mem, 0, tinfoo, idaapi.TINFO_DEFINITE)
-                print("Here One")
-                #struc_mem = idaapi.get_member_by_name(class_struc, "m")
-                #struc_member_name = struct_name+"_mbrs m;"
-                #tinfoo = idaapi.tinfo_t()
-                #idaapi.parse_decl(tinfoo, idaapi.cvar.idati, struc_member_name, idaapi.PT_VAR)
-                #idaapi.set_member_tinfo(class_struc, struc_mem, 8, tinfoo, idaapi.TINFO_DEFINITE)
-                #mbrs_size = vtab_size[key] #if "<" not in struct_name else vtab_size["`vtable for'"+struct_name.replace("_vtbl","")[0:struct_name.find("<")]] 
                 mbrs_size = class_dict[struct_name].getSize() if struct_name in list(class_dict.keys()) else 200
                 idaapi.add_struc_member(class_struc, "mbrs", 8, idc.FF_QWORD, None, mbrs_size)
                 mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
@@ -1010,9 +965,8 @@ def create_structs(class_dict, inherits_dict):
                 #idaapi.parse_decl(type_info, idaapi.cvar.idati, member_name, idaapi.PT_TYP)
                 idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
                 print("Member class size", mbrs_size)
-                #if struct_name in list(class_dict.keys()) or demangle_name(get_name(class_dict[struct_name].getSuperClass()),idc.get_inf_attr(idc.INF_LONG_DN)) in list(class_dict.keys()): 
                 if super_class_obj != "" and super_class_obj != None: 
-                    handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses) 
+                    handle_super_class(class_dict, super_class_obj, mbrs_struct) 
 
 
 
