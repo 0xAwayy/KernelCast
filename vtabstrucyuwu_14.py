@@ -30,7 +30,7 @@ import time
 Why would I want to make my life harder? Might as well make these global 
 """
 capstone_instance = None
-unicorn_instance = None 
+unicorn_instance = None
 IOKitBaseClasses = ["OSObject", "OSMetaClassBase", "OSData", "OSDictionary", "OSCollection", "OSSet", "OSMetaClass", "OSMetaClassBase"]
 types_list = [
         "volatile", "unsigned", "register", "struct", "static", "unsigned __int8", "unsigned __int16", "unsigned __int32", "unsigned __int64", "unsigned __int128",
@@ -462,7 +462,7 @@ def extract_parameter_types(func_str):
             param_type_match = type_pattern.match(param.strip())
             if param_type_match:
                 param_type = param_type_match.group(0).strip()
-                param_type = re.sub(r'[*]|__hidden|const|__struct_ptr', '', param_type).strip()
+                param_type = re.sub(r'[*]|__hidden|const|__struct_ptr|&', '', param_type).strip()
                 # Remove parameter names
                 param_type = re.sub(r'\s\w+$', '', param_type)
                 param_types.append(param_type)
@@ -479,51 +479,48 @@ def local_type_exists(type_name):
     return False
 
 def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses, depth = 0):
-    offset = 0 #current offset in the member variable struct
-    if super_class_obj: 
-        super_class_name = super_class_obj.getName()
-        parent_class_name = super_class_obj.getSuperClass()
-        tinfo = idaapi.tinfo_t()
-        til = idaapi.cvar.idati
-        if parent_class_name:
-            if parent_class_name not in IOKitBaseClasses:
+    for class_name in class_dict.keys():
+        if class_dict[class_name].getSuperClass() in list(class_dict.keys()):
+            class_dict[class_name].classSizeInheritance = class_dict[class_dict[class_name].getSuperClass()].getSize() 
+    if super_class_obj: #checks if the object being passed exsists
+        super_class_name = super_class_obj.getName() #gets the name of the base class
+        parent_class_name = super_class_obj.getSuperClass() #gets the name of the super class
+        tinfo = idaapi.tinfo_t() #object to hold type info for our base class pointer 
+        til = idaapi.cvar.idati #variable type library
+        if parent_class_name in list(class_dict.keys()) or parent_class_name in IOKitBaseClasses: #checks if parent_class_name is in IOKitbaseClasses or in class_dict which contains each class object
+            if parent_class_name not in IOKitBaseClasses and parent_class_name in list(class_dict.keys()):
                 idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize()) #Adds the base class member variable with size of the parent class
                 base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
-                base_class_decl = f"struct {parent_class_name}_mbrs;"
-                idc.set_local_type(-1, base_class_decl, idaapi.PT_TYP)
-                base_class_decl = f"struct {parent_class_name}_mbrs base_class_ptr;"
+                #base_class_decl = f"struct {parent_class_name}_mbrs;"
+                #idc.set_local_type(-1, base_class_decl, idaapi.PT_TYP)
+                base_class_decl = f"struct {parent_class_name}::fields base_class_ptr;"
                 idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_TYP)
                 idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
-                offset += class_dict[parent_class_name].getSize()
-            else:
+            elif parent_class_name in IOKitBaseClasses:
                 idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
                 base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
                 base_class_decl = f"struct {parent_class_name} base_class_ptr;"
                 idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_TYP)
                 idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
-                offset += class_dict[parent_class_name].getSize()
         else:
-            print("No parent class!")
+            child_sz = super_class_obj.classSize
+            padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
+            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz) 
+            padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
+
 
         
         # Calculate the padding size
-        if parent_class_name:
-            child_sz = super_class_obj.classSize
-            parent_sz = super_class_obj.classSizeInheritance - child_sz
+        if parent_class_name in list(class_dict.keys()):
+            child_sz = super_class_obj.getSize()
+            parent_sz = class_dict[parent_class_name].getSize()
             adding_size = (child_sz - 8) - (parent_sz - 8)
 
-            if adding_size > 0:
-                padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", offset, idc.FF_BYTE, None, 1)
-                offset+=1
-                padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", offset+1, idc.FF_QWORD, None, adding_size)
-                padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", offset + adding_size, idc.FF_BYTE, None, 1)
-        else:
-            child_sz = super_class_obj.classSize
-            padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", offset, idc.FF_BYTE, None, 1)
-            offset+=1
-            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", offset+1, idc.FF_QWORD, None, child_sz) 
-            padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", child_sz+offset, idc.FF_BYTE, None, 1)
-
+            if adding_size > 2:
+                padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
+                padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, adding_size - 2)
+                padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
+    
 
 def check_type(type_name):
     tinfo = idaapi.tinfo_t()
@@ -585,21 +582,21 @@ def create_structs(class_dict, inherits_dict):
         prev_type = ""
         struct_name = key
         add_struc(-1, struct_name, False) 
-        if key not in IOKitBaseClasses:
+        if struct_name not in IOKitBaseClasses:
             add_struc(-1, struct_name+"_vtbl", False)
             fields_name = f"{struct_name}::fields"
             add_struc(-1, fields_name, False)
             fields_name = f"struct {struct_name}::fields;"
             idc.set_local_type(-1, fields_name, idaapi.PT_TYP)
             fields_name = f"typedef struct {struct_name}::fields {struct_name}_mbrs;"
-            idc.set_local_type(-1, fields_name, idaapi.PT_TYP)
+            ret = idc.set_local_type(-1, fields_name, idaapi.PT_TYP)
             struct_alignment(struct_name)
             struct_alignment(struct_name+"_vtbl")
             struct_alignment(struct_name+"::fields")
         struc = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_vtbl"))
         class_struc = idaapi.get_struc(idaapi.get_struc_id(struct_name)) 
         mbrs_struct = idaapi.get_struc(idaapi.get_struc_id(struct_name+"::fields"))
-        if key not in vtab_decls.keys():
+        if key not in list(vtab_decls.keys()):
             add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
             struct_member = idaapi.get_member_by_name(struc, "thisOffset") 
             tinfo = idaapi.tinfo_t()
@@ -624,7 +621,7 @@ def create_structs(class_dict, inherits_dict):
             mbrs_size = class_dict[struct_name].getSize() if struct_name in list(class_dict.keys()) else 200
             idaapi.add_struc_member(class_struc, "mbrs", 8, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
-            member_name = f"struct {struct_name} mbrs;" if struct_name in IOKitBaseClasses else f"struct {struct_name}_mbrs mbrs;"
+            member_name = f"struct {struct_name} mbrs;" if struct_name in IOKitBaseClasses else f"struct {struct_name}::fields;"
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
             print(f"Member name: {member_name}") 
@@ -679,6 +676,8 @@ def create_structs(class_dict, inherits_dict):
                         func_type = func_type.replace("::*", "*")
                     #_vm_map seems to be weird edge case, created a typedef for it
                     #typedef vm_map_t _vm_map;
+                    if "{ block_ptr}" in func_type:
+                        func_type = func_type.replace("{ block_ptr}", "(*)")
                     if "_vm_map" in func_type:
                         tinfo = idaapi.tinfo_t()
                         til = idaapi.cvar.idati
@@ -696,8 +695,10 @@ def create_structs(class_dict, inherits_dict):
                         temp_type = template_type_cleaned.split("_")[1]
                         temp_type_str = f"struct {temp_type};"
                         print(f"Parameter Type: {temp_type_str}")
-                        result = idc.set_local_type(-1, temp_type_str, ida_typeinf.PT_TYP)
-                        print(f"Result for parameter type: {result}")
+                        if temp_type_str.replace("struct ","").replace(";","") not in defined_types:
+                            result = idc.set_local_type(-1, temp_type_str, ida_typeinf.PT_TYP)
+                            print(f"Result for parameter type: {result}")
+                            defined_types.append(temp_type_str.replace("struct ","").replace(";",""))
 
     # Then, create the typedef using the previously defined template parameter types
                     if "<" in func_type and ">" in func_type:
@@ -705,7 +706,6 @@ def create_structs(class_dict, inherits_dict):
                         print(f"Template type: {local_type_details}")
                         result = idc.set_local_type(-1, local_type_details, ida_typeinf.PT_TYP)
                         print(f"Result for template type: {result}")
-
                         func_type = func_type.replace(template_type, template_type_cleaned)
                     print(f"Func Type after processing: {func_type}")
                     parameter_list = extract_parameter_types(func_type)
@@ -753,10 +753,14 @@ def create_structs(class_dict, inherits_dict):
             idaapi.parse_decl(tinfoo, idaapi.cvar.idati, struc_member_name, idaapi.PT_VAR)
             idaapi.set_member_tinfo(class_struc, struc_mem, 0, tinfoo, idaapi.TINFO_DEFINITE)
             print("Here One")
-            mbrs_size = class_dict[struct_name].getSize() if struct_name in list(class_dict.keys()) else 200
+            mbrs_size = 0
+            if super_class_name in list(class_dict.keys()):
+                mbrs_size = (class_dict[struct_name].getSize() - 8) + (class_dict[super_class_name].getSize() - 8)
+            elif struct_name in list(class_dict.keys()):
+                mbrs_size = class_dict[struct_name].getSize()
             idaapi.add_struc_member(class_struc, "mbrs", 8, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
-            member_name = f"struct {struct_name} mbrs;" if struct_name in IOKitBaseClasses else f"struct {struct_name}_mbrs mbrs;"
+            member_name = f"struct {struct_name} mbrs;" if struct_name in IOKitBaseClasses else f"struct {struct_name}::fields;"
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
             print(f"Member name: {member_name}") 
