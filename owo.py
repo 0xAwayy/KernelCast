@@ -1,17 +1,8 @@
-#keeping this for reference
-#What the problem is: I need vtables from each mf class as a struct and I need them now!
-#Well every class inherits from OSMetaClassBase, from there it trickles down. OSMetaClassBase contains 4 useful member vars
-#a pointer to da supaclass
-#a string ref to the name of the class
-#class size 
-#ref count which is fucking useless because the shit isn't even running, fuck am I gonna do with that
-#What IS useful, a pointa to da supaclass, string ref to class name, and the class size
-
-
-#idea for getting member variables for structs, look through each functions disassembly of that class and emulate it with unicorn
-#log access to each member variables offsets to a list, sort the list by lowest to highest, use a foor loop from start to end with 4 step to keep consistent member var size + padding
-#than create a member variable at each offset, with said padding inbetween 
-
+"""
+------/ iOS Kcache Parser /------
+Author: @ByteTh1ef
+Description: This IDAPython script will use emulation to emulate all xrefs to OSMetaClass::OSMetaClass(char const*, OSMetaClass const*, unsigned int) and recreate the class hierarchy using structs for each IOKit class.
+"""
 
 import idaapi
 import idc
@@ -28,9 +19,11 @@ from capstone.arm64 import *
 import re
 import math
 import time
+
 """
-Why would I want to make my life harder? Might as well make these global 
+------/ Global Variables /------
 """
+
 capstone_instance = None
 unicorn_instance = None
 IOKitBaseClasses = ["OSObject", "OSMetaClassBase", "OSData", "OSDictionary", "OSCollection", "OSSet", "OSMetaClass", "OSMetaClassBase"]
@@ -56,9 +49,9 @@ prev_defined = [
 defined_types = [        
 ]
 """
-class vtables: used to store information about a classes vtable
-self.name: name of the vtable
-self.members: each member of the vtable, could be functions or member vars
+------/ Class Vtables /------
+Description: This class will be used to store the vtable information for each class.
+Fun Fact: I never actually used this class, but I'm keeping it here for future reference.
 """
 class vtables:
     def __init__(self, name):
@@ -73,12 +66,14 @@ class vtables:
             self.members.append(member)
 
 """
-self.name: name of the class 
-self.superClass: name of the superClass 
-self.classSize: size of the class on it's own
-self.classSizeInheritance: size of the class + size of the inherited classes
-self.vtable: list of virtual table methods or member variables 
-self.children: list of type IOClass that has objects representing each child class 
+------/ Class IOClass /------
+Description: This is the class that will be used to store the information for each IOKit class.
+Name: The name of the class.
+SuperClass: The name of the parent class.
+ClassSize: The size of the class.
+ClassSizeInheritance: The size of the class with inherited members.
+Vtable: The address of the vtable.
+Children: A list of all the children of the class.
 """
 class IOClass:
     def __init__(self, name, superClass, classSize, classSizeInheritance = 0):
@@ -114,24 +109,34 @@ class IOClass:
 
 
 """
-this function initially iterates over all of the functions, with func being the start_ea/addr 
-than it get's the name of the functioon, demangles it and checks if it's OSMetaClass constructor
-if it is than return
+------/ get_osmeta_constructor /------
+Description: This function will return the address of the OSMetaClass::OSMetaClass(char const*, OSMetaClass const*, unsigned int) constructor.
 """
 def get_osmeta_constructor():
     for func in list(idautils.Functions()):
         if idc.demangle_name(ida_funcs.get_func_name(func), idc.get_inf_attr(idc.INF_LONG_DN)) == "OSMetaClass::OSMetaClass(char const*, OSMetaClass const*, unsigned int)":
             return func #starting addr to the osmetaclass ctor
 
-#return hex("".join([func for func in list(idautils.Functions()) if idc.demangle_name(ida_funcs.get_func_name(func), idc.get_inf_attr(idc.INF_LONG_DN)) == "OSMetaClass::OSMetaClass(char const*, OSMetaClass const*, unsigned int)"]))
+"""
+------/ print_dict /------
+Description: This function is a helper function that will print out the inheritance dictionary in a nice format.
+d: The dictionary to print out.
+indent: The amount of spaces to indent the output.
+"""
 def print_dict(d, indent=0):
-    for key, value in d.items():
+    for key, value in d.items(): 
         print(' ' * indent + str(key))
-        if isinstance(value, dict):
+        if isinstance(value, dict): 
             print_dict(value, indent+4)
         else:
             print(' ' * (indent+4) + str(value))
 
+
+"""
+------/ create_class_hierarchy /------
+Description: This function will take in a list of lists with the format [child, parent] and will return a dictionary with the format {parent: {child: {}}}
+class_list: The list of lists with the format [child, parent]
+"""
 def create_class_hierarchy(class_list):
     hierarchy = {}
     for child, parent in class_list:
@@ -140,6 +145,11 @@ def create_class_hierarchy(class_list):
         hierarchy[parent][child] = {}
     return hierarchy
 
+"""
+------/ fill_inheritance_gaps /------
+Description: This function will take in a dictionary with the format {parent: {child: {}}} and will fill in the gaps in the inheritance tree.
+hierarchy: The dictionary to fill in the gaps for.
+"""
 def fill_inheritance_gaps(hierarchy):
     for parent, children in hierarchy.items():
         for child, grand_children in children.items():
@@ -147,7 +157,12 @@ def fill_inheritance_gaps(hierarchy):
                 hierarchy[parent][child] = hierarchy[child]
     return hierarchy
 
-#this takes in an instances of capstone and disassembles it
+"""
+------/ disassemble_insc /------
+Description: This function will take in a capstone instance and an address and will return the disassembled instruction at that address.
+capstone_instance: The capstone instance to use.
+addr: The address to disassemble.
+"""
 def disassemble_insc(capstone_instance, addr):
     return capstone_instance.disam(ida_bytes.get_dword(addr).to_bytes(4, byteorder="little"), addr)
 
@@ -164,25 +179,36 @@ Phook Lore Entry:
 """
 phook_reg = [0, 0, 0] 
 
+
+"""
+------/ hook_invalid_uc /------
+Description: Function hook for the unicorn instance, if an invalid instruction is hit, the function body is executed
+uc: the unicorn instance
+"""
 def hook_invalid_uc(uc):
     print("[+] Invalid instruction hit")
 
+
+"""
+------/ hook_insn_uc /------
+Description: Function hook for regular instruction, the hooks function body is ran every time an instruction is reached
+uc: the unicorn instance
+address: the address of the instruction
+size: the size of the instruction
+user_data: user data passed in
+"""
 def hook_insn_uc(uc, address, size, user_data):
     global capstone_instance
-    global phook_reg
-    src = 0
-    offset = 0
-    reg = 0
-    #ins_bytes = list(capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address))
-
-    #instrs_bytes = uc.mem_read(address, size)
+    global phook_reg #phook_reg essentially holds the value of the register at the exact moment the LDR instruction is hit, this is to prevent the value from being set to 0, a prehook saved state if you will
+    src = 0 #source register
+    offset = 0 #offset of the LDR instruction
+    reg = 0 
     if not capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address): 
         print("[+] My brother this is an invalid line that could not be diassembled... inshallah very haram")
         return None
     x1 = uc.reg_read(arm64_const.UC_ARM64_REG_X1) #class name
     x2 = uc.reg_read(arm64_const.UC_ARM64_REG_X2) #super class
     w3 = uc.reg_read(arm64_const.UC_ARM64_REG_W3) #size of class 
-    # ^^ these three registers are function arguments for a call to OSMetaClass::OSMetaClass(), if we can intercept these arguments during execution during emulation, we can get this info ez pz
     for instr in capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address):
         if instr.mnemonic == "RETAB":
             print(f"[+] Allegedly reached the end of func at addr: 0x{hex(address)}") #in the case that we reach the end of the function, just in case emulator size constraints are sqrewed we quit
@@ -209,6 +235,15 @@ def hook_insn_uc(uc, address, size, user_data):
                     elif read_offset_bytes == 0 and src == ARM64_REG_X2:
                         phook_reg[1] = x2 + offset
 
+
+"""
+------/ unicorn_emulate /------
+Description: This function will take in a function call address and will emulate the function call using unicorn, the end goal is to get the contents of the x1, x2, and w3 registers
+func_call_addr: The address of the function call to emulate
+X1: The Class Name
+X2: The Super Class
+W3: The Size of the Class
+"""
 def unicorn_emulate(func_call_addr):
     global unicorn_instance
     global phook_reg
@@ -231,20 +266,15 @@ def unicorn_emulate(func_call_addr):
     return [x1,x2,w3] 
 
 
-"""
-For emulation, this is a last ditch effort essentially, what I need to do is first check if the vtable is public 
-or not, the only reason I need to do that is because if it isn't public than the name and typing for the functions will be very off/return None, so what now?
-We emulate! We know what class the vtable is for, so we can use that to get the constructor for that class, in the constructor, the addr for the vtable is loaded into reg X16 and offset by 10 in order to access presumably an allocation method, but we don't need that, we just need the address of the vtable which is calculated using an ADRL instruction meaning it uses the current instruction addr to calculate the location of the vtable, which we can do. Just like last time with phook_reg, when reading from ADRP, it's possible that 0 is returned because the value in X16 is caluclated with a dereference which does not store the memory after the operation so we need to yoink it asap, if we don't yoink it tho we'll default it to 0 and say we weren't swag enough to read from the reg"""
 
-#Read up to ADRL instruction to X16 to grab the vtable which is offset from the current PC, try not to miss the dereference or else it will return garbage :(
 def insc_hook_vtab(uc, address, size, user_data):
     global capstone_instance
     if not capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address):
-        print("[+] Could not grab the mf fucking uhhhhh the instruction uhhhhh guh")
+        print("[+] Unable to diassemble instruction, returning...")
     x16 = unicorn_instance.reg_read(UC_ARM64_REG_X16)
     for instr in capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address):
         if instr.mnemonic == "retab":
-            print(f"[+] Allegedly reached the end of func at addr: 0x{hex(address)}") #in the case that we reach the end of the function, just in case emulator size constraints are sqrewed we quit
+            print(f"[+] End Addr: 0x{hex(address)}") #in the case that we reach the end of the function, just in case emulator size constraints are sqrewed we quit
             printf(f"[+] 0x{hex(instr.address)}\t{instr.mnemonic}, {instr.op_str}") 
             uc.emu_stop()
         elif instr.mnemonic == "adrl":
@@ -253,6 +283,12 @@ def insc_hook_vtab(uc, address, size, user_data):
 
 value_X16 = 0 #Global variable used to store the value of X16 in case dereference occurs and we read the reg value too late
 
+
+"""
+------/ grab_vtable_addr /------
+Description: This function is actually unfinished, the original idea was to emulate up to a certain point to grab vtables in a more consistent manner because not every single name in IDA is public, but I ended up not needing it
+constructor_addr: The address of the constructor to emulate
+"""
 def grab_vtable_addr(constructor_addr):
     global unicorn_instance
     global value_X16
@@ -266,7 +302,13 @@ def grab_vtable_addr(constructor_addr):
     X16 = unicorn_instance.reg_read(UC_ARM64_REG_X16)
     print(X16)
 
-
+"""
+------/ grab_vtable_start /------
+Description: This function is unfinished, the idea was to grab the constructor of each class and than use that to grab the adder of the constructor than
+emulate up to a certain point to grab the vtable address, however this strategy would be really garbage simply put because not every single constructor loads the vtable
+into X16, so this would be a very inconsistent method of grabbing vtables
+className: The name of the class to grab the vtable of
+"""
 def grab_vtable_start(className):
     global unicorn_instance
     deref = 0 #used to grab vtable immediate in case a dereference happens
@@ -278,6 +320,12 @@ def grab_vtable_start(className):
     true_start = ida_funcs.get_func(func_addr).start_ea
     true_end = ida_funcs.get_func(func_addr).end_ea
 
+
+"""
+------/ var_generic_names /------
+Description: the idea of this function was to replace all the arguments of a function with generic names, however this function ended up being unused lol
+sig: The signature of the function to replace the arguments of
+"""
 def var_generic_names(sig):
     # Split the signature into the function name and argument list
     match = re.match(r"^([\w\s*]+)\(([\w\s*,]*)\)$", sig)
@@ -320,28 +368,27 @@ def var_generic_names(sig):
 
 
 """
-What's the end goal for this? 
-Let's say you have the current definition
-['void __cdecl(OSObject *__hidden this)', 'IOAVControllerAddDeviceCompletion::~IOAVControllerAddDeviceCompletion()']
-The final result should be void (__cdecl *DTOR_IOAvControllerAddDeviceCompletion)(OSObject* __hidden this)
-In theory, what are the patterns I should be searching for. Definetly for __ so I can grab the calling convetion of the function,
-another thing I should look out for is templates, so <> would be an interesting pattern, lambdas are in the form of function pointers, so look for function pointer patterns as well such as (*). In the second string of the list, I should search for ~ so I know it's a DTOR.
+------/ parse_func /------
+Description: Okay so this function is a bit of a mess, but the idea is that it takes the function info from the vtable and than parses it to get the function name and the function type as well as the
+parameters of the function, the end goal being to rewrite the function info as a function pointer in the struct
+func_info: The function info to parse
+func_info[0]: The function name
+func_info[1]: The function type
+func_info[2]: The function address
 """
 def parse_func(func_info):
-    print(func_info)
-    if ida_funcs.get_func_name(func_info[2]) == None: 
+    print(func_info) #debugging purposes
+    if ida_funcs.get_func_name(func_info[2]) == None: #if the function name is none, we return an empty string
         return ""
-    elif "sub_" in ida_funcs.get_func_name(func_info[2]):
-        print(func_info)
-        final_type = ""
-        final_type += "__int64 (__fastcall *" 
-        final_type += idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) if idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) != None else ida_funcs.get_func_name(func_info[2]) + ")" +"(void)"
-        print("Final vfunc type: ", final_type, "\n")
-        if "~" in final_type:
-            final_type.replace("~", "DTOR_")
+    elif "sub_" in ida_funcs.get_func_name(func_info[2]): #if the function name is sub_...
+        print(func_info) #debugging purposes
+        final_type = "" #final type of the function
+        final_type += "__int64 (__fastcall *" #function pointer return type/calling convetion
+        final_type += idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) if idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) != None else ida_funcs.get_func_name(func_info[2]) + ")" +"(void)" #function name + void parameters if the functionn name can't be demangled
+        print("Final vfunc type: ", final_type, "\n") #debugging purposes
         final_type += ";"
         return final_type
-    elif func_info[1] == None and func_info[0] != None:
+    elif func_info[1] == None and func_info[0] != None: #if
         final_type = ""
         func_type = func_info[0] 
         func_name = idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) if idc.demangle_name(ida_funcs.get_func_name(func_info[2]), True) != None else ida_funcs.get_func_name(func_info[2]) 
@@ -433,7 +480,6 @@ def parse_func(func_info):
     print("Final vfunc type: " , final_type, "\n")
     return final_type
 
-#Write a function that will take a function and return the type of each parameter that the function has for example if the function is void __fastcall sub_140001000(int a1, int a2, int a3) then it will return int, int, int
 def get_type(func_addr):
     func_obj = ida_funcs.get_func(func_addr)
 
@@ -446,7 +492,6 @@ def extract_function_name(input_string):
         return match.group(1)
     return None
 
-#Extracts parameter types to create local types 
 
 def extract_parameter_types(func_def, func_ea):
     types = []
@@ -460,32 +505,6 @@ def extract_parameter_types(func_def, func_ea):
     for pos, argument in enumerate(funcdata):
         types.append(argument.type.get_pointed_object().dstr())
     return types        
-"""
-def extract_parameter_types(func_str):
-    func_str = re.sub(r'\b\w+\*', '*', func_str)  # Remove pointer names
-    func_str = re.sub(r'[*]|__hidden|const|__struct_ptr|', '', func_str).strip()  # Remove unwanted substrings
-
-    param_pattern = re.compile(r'\([^()]*\)')
-    matches = param_pattern.findall(func_str)
-    if not matches:
-        return []
-
-    params_str = matches[-1][1:-1]
-    params = re.split(r',\s*(?![^<>]*>)', params_str)
-
-    type_pattern = re.compile(r'\b(?:\w+::)?\w+(?:<[^>]+>)?(?:\s*\*|\s*&)?')
-    param_types = []
-
-    for i, param in enumerate(params):
-        param_type = type_pattern.match(param)
-        if param_type:
-            if i == len(params) - 1:
-                param_types.append(param_type.group(0).strip() + param[param_type.end():].strip())
-            else:
-                param_types.append(param_type.group(0).strip())
-
-    return param_types
-"""
 
 def local_type_exists(type_name):
     #Iterates over each local name than grab the name of the type at that ordinal and compare it to the name passed
