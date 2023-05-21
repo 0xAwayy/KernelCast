@@ -885,10 +885,10 @@ def create_structs(class_dict, inherits_dict):
             #if super_class_obj != "" and super_class_obj != None: 
             handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses) 
 
-    for key in class_dict:
-        struct_alignment(key)
-        struct_alignment(key + "_vtbl")
-        struct_alignment(key + "_mbrs")
+    #for key in class_dict:
+    #    struct_alignment(key)
+    #    struct_alignment(key + "_vtbl")
+    #    struct_alignment(key + "_mbrs")
  
 
 
