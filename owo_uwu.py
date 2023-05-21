@@ -123,13 +123,13 @@ Description: This function is a helper function that will #print out the inherit
 d: The dictionary to #print out.
 indent: The amount of spaces to indent the output.
 """
-def #print_dict(d, indent=0):
+def print_dict(d, indent=0):
     for key, value in d.items(): 
         #print(' ' * indent + str(key))
         if isinstance(value, dict): 
-            #print_dict(value, indent+4)
+            print_dict(value, indent+4)
         else:
-            #print(' ' * (indent+4)+str(value))
+            print(' ' * (indent+4)+str(value))
 
 
 """
@@ -186,7 +186,7 @@ Description: Function hook for the unicorn instance, if an invalid instruction i
 uc: the unicorn instance
 """
 def hook_invalid_uc(uc):
-    #print("[+] Invalid instruction hit")
+    print("[+] Invalid instruction hit")
 
 
 """
@@ -275,7 +275,7 @@ def unicorn_emulate(func_call_addr):
 def insc_hook_vtab(uc, address, size, user_data):
     global capstone_instance
     if not capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address):
-        #print("[+] Unable to diassemble instruction, returning...")
+        print("[+] Unable to diassemble instruction, returning...")
     x16 = unicorn_instance.reg_read(UC_ARM64_REG_X16)
     for instr in capstone_instance.disasm(ida_bytes.get_dword(address).to_bytes(4, byteorder="little"), address):
         if instr.mnemonic == "retab":
@@ -770,7 +770,7 @@ def create_structs(class_dict, inherits_dict):
                         type_decl = idaapi.parse_decl(tinfo, til, local_type_details, ida_typeinf.PT_SIL)
                         if type_decl:
                             index = idc.set_local_type(-1, local_type_details, ida_typeinf.PT_SIL)
-                            if index != -1:
+                            #if index != -1:
                                 #print(f"Successfully added local type: {local_type_details}")
                     #print(f"Func Type before processing: {func_type}")
                     # First, define local types for all the template parameters
@@ -836,7 +836,7 @@ def create_structs(class_dict, inherits_dict):
                     idaapi.set_member_tinfo(struc, struct_member, offset, tinfo, idaapi.TINFO_GUESSED)
                     prev_type = func_type
                     offset+=8
-                else:
+                #else:
                     #print("Type: ", func_type)
             #Adds main struct
             class_obj = class_dict[struct_name] #Get the current class object
@@ -866,7 +866,7 @@ def create_structs(class_dict, inherits_dict):
             mbrs_size = class_dict[struct_name].getSize()-8
             idaapi.add_struc_member(class_struc, "mbrs", idaapi.BADADDR, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
-            if not mbr_struc_member:
+            #if not mbr_struc_member:
                 #print("Error: mbr_struc_member is None")
             #if struct_name+"_mbrs" in [x[2] for x in Structs()]:
             member_name = f"struct {struct_name}_mbrs mbrs;"
@@ -876,7 +876,7 @@ def create_structs(class_dict, inherits_dict):
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
             result = idaapi.parse_decl(tinfo, til, member_name, idaapi.PT_SIL)
-            if not result:
+            #if not result:
                 #print("Error: parse_decl failed")
             #print(f"Parsed tinfo: {tinfo}")
             idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
