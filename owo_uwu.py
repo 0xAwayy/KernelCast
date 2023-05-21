@@ -565,23 +565,29 @@ def handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses, dep
         tinfo = idaapi.tinfo_t()
         til = idaapi.cvar.idati
         print("Parent class name: ", parent_class_name, "\n")
-        if parent_class_name in list(class_dict.keys()): # or parent_class_name in IOKitBaseClasses):
+        #if parent_class_name in list(class_dict.keys()): # or parent_class_name in IOKitBaseClasses):
+        #    idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize()-8)
+        #    base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
+        #    base_class_decl = f"{parent_class_name}_mbrs base_class_ptr;"
+        #    idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
+        #    idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_GUESSED)
+        #    #elif parent_class_name in IOKitBaseClasses:
+        #    #    idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
+        #    #    base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
+        #    #    base_class_decl = f"{parent_class_name}_mbrs* base_class_ptr;"
+        #    #    idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
+        #    #    idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
+        #else:
+        #    child_sz = class_obj.getSize() - 8
+        #    padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
+
+        if parent_class_name in list(class_dict.keys()):
             idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize()-8)
             base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
             base_class_decl = f"{parent_class_name}_mbrs base_class_ptr;"
             idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
             idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_GUESSED)
-            #elif parent_class_name in IOKitBaseClasses:
-            #    idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
-            #    base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
-            #    base_class_decl = f"{parent_class_name}_mbrs* base_class_ptr;"
-            #    idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
-            #    idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
-        else:
-            child_sz = class_obj.getSize() - 8
-            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
 
-        if parent_class_name in list(class_dict.keys()):
             child_sz = class_obj.getSize()
             parent_sz = class_dict[parent_class_name].getSize()
             adding_size = (child_sz - 8)
@@ -705,8 +711,8 @@ def create_structs(class_dict, inherits_dict):
             idaapi.parse_decl(tinfo, til, member_name, idaapi.PT_SIL)
             idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
             print("Member class size", mbrs_size)
-            if super_class_obj != "" and super_class_obj != None: 
-                handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses) 
+            #if super_class_obj != "" and super_class_obj != None: 
+            handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses) 
 
         else:
             print("Here UwU")
@@ -876,8 +882,8 @@ def create_structs(class_dict, inherits_dict):
             idaapi.set_member_tinfo(class_struc, mbr_struc_member, 8, tinfo, idaapi.TINFO_DEFINITE)
             print("Member class size", mbrs_size)
             #if struct_name in list(class_dict.keys()) or demangle_name(get_name(class_dict[struct_name].getSuperClass()),idc.get_inf_attr(idc.INF_LONG_DN)) in list(class_dict.keys()): 
-            if super_class_obj != "" and super_class_obj != None: 
-               handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses) 
+            #if super_class_obj != "" and super_class_obj != None: 
+            handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses) 
 
     for key in class_dict:
         struct_alignment(key)
