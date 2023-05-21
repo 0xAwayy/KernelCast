@@ -1,6 +1,6 @@
 """
 ------/ iOS Kcache Parser /------
-Author: @ByteTh1ef
+Author: @Awayy
 Description: This IDAPython script will use emulation to emulate all xrefs to OSMetaClass::OSMetaClass(char const*, OSMetaClass const*, unsigned int) and recreate the class hierarchy using structs for each IOKit class.
 """
 
@@ -129,7 +129,7 @@ def print_dict(d, indent=0):
         if isinstance(value, dict): 
             print_dict(value, indent+4)
         else:
-            print(' ' * (indent+4) + str(value))
+            print(' ' * (indent+4)+str(value))
 
 
 """
@@ -256,14 +256,19 @@ def unicorn_emulate(func_call_addr):
     unicorn_instance.mem_write(start_addr, ida_bytes.get_bytes(start_addr, func_call_addr-start_addr)) #update start to have new KB aligned address 
     unicorn_instance.hook_add(UC_HOOK_CODE, hook_insn_uc, begin = start_addr, end = func_call_addr)
     unicorn_instance.hook_add(UC_HOOK_INSN_INVALID, hook_invalid_uc)
-    unicorn_instance.emu_start(start_addr, func_call_addr)
-    x1 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_X1)
-    x2 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_X2)
-    w3 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_W3)
-    x1 = phook_reg[0] if x1==0 else x1
-    x2 = phook_reg[1] if x2==0 else x2
-    w3 = phook_reg[2] if w3==0 else w3
-    return [x1,x2,w3] 
+    try:
+        unicorn_instance.emu_start(start_addr, func_call_addr)
+        x1 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_X1)
+        x2 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_X2)
+        w3 = unicorn_instance.reg_read(arm64_const.UC_ARM64_REG_W3)
+        x1 = phook_reg[0] if x1==0 else x1
+        x2 = phook_reg[1] if x2==0 else x2
+        w3 = phook_reg[2] if w3==0 else w3
+        return [x1,x2,w3] 
+    except UcError as e:
+        print(f"Unicorn Error: {e}")
+        return 0
+
 
 
 
@@ -480,19 +485,36 @@ def parse_func(func_info):
     print("Final vfunc type: " , final_type, "\n")
     return final_type
 
+
+"""
+------/ get_type /------
+Description: Gets the type of the function at the given address
+func_addr: The address of the function
+"""
 def get_type(func_addr):
     func_obj = ida_funcs.get_func(func_addr)
 
-#Extract function name
+"""
+------/ extract_function_name /------
+Description: Extracts the function name from the given string using regex
+input_string: The string to extract the function name from
+"""
 def extract_function_name(input_string):
     # Regex pattern to match function names
-    pattern = r'\* *\(*([\w]+)\)'
+    pattern = r'\* *\(*([\w]+)\)' 
     match = re.search(pattern, input_string)
     if match:
         return match.group(1)
     return None
 
-
+"""
+------/ extract_parameter_types /------
+Description: Extracts the parameter types from the given string using the idaapi
+func_def: The string to extract the parameter types from
+func_ea: The address of the function
+Fun Fact: This function used to use regex to extract the parameter types, but there was an easier way using the idaapi
+not every problem needs a needlessly complicated solution :P
+"""
 def extract_parameter_types(func_def, func_ea):
     types = []
     tif = ida_typeinf.tinfo_t()
@@ -506,6 +528,12 @@ def extract_parameter_types(func_def, func_ea):
         types.append(argument.type.get_pointed_object().dstr())
     return types        
 
+
+"""
+------/ local_type_exists /------
+Description: Checks if the given type exists in the local types
+type_name: The name of the type to check for
+"""
 def local_type_exists(type_name):
     #Iterates over each local name than grab the name of the type at that ordinal and compare it to the name passed
     for i in range(1, idc.get_ordinal_qty()):
@@ -513,26 +541,36 @@ def local_type_exists(type_name):
         if type_name == current_type_name:
             return True
     return False
-#super class is actually the base class, please ignore the naming of the variable it's very confusing, not sure why I named it that way lol.
-def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasses, depth=0):
+
+
+"""
+------/ handle_super_class /------
+Description: So the name is a bit misleading, my next goal is to fix the naming, however
+this function is used to essentially fill out the members structure for each class
+class_dict: The dictionary of classes
+super_class_obj: the base class object, yeah I know the naming is bad
+mbrs_struct: The members structure
+IOKitBaseClasses: The list of base classes **DEPRECATED**
+depth: The depth of the hierarchy **DEPRECATED** 
+"""
+def handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses, depth=0):
     for class_name in class_dict.keys():
         super_class = class_dict[class_name].getSuperClass()
         if super_class in list(class_dict.keys()):
-            class_dict[class_name].classSizeInheritance = class_dict[super_class].getSize()
+            class_dict[class_name].classSizeInheritance = class_dict[super_class].getSize() + class_dict[class_name].getSize()
 
-    if super_class_obj:
-        super_class_name = super_class_obj.getName()
-        parent_class_name = super_class_obj.getSuperClass()
+    if class_obj:
+        super_class_name = class_obj.getName()
+        parent_class_name = class_obj.getSuperClass()
         tinfo = idaapi.tinfo_t()
         til = idaapi.cvar.idati
         print("Parent class name: ", parent_class_name, "\n")
         if parent_class_name in list(class_dict.keys()): # or parent_class_name in IOKitBaseClasses):
-            if parent_class_name in list(class_dict.keys()):
-                idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
-                base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
-                base_class_decl = f"{parent_class_name}_mbrs base_class_ptr;"
-                idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
-                idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
+            idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize()-8)
+            base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
+            base_class_decl = f"{parent_class_name}_mbrs base_class_ptr;"
+            idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
+            idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_GUESSED)
             #elif parent_class_name in IOKitBaseClasses:
             #    idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
             #    base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
@@ -540,100 +578,112 @@ def handle_super_class(class_dict, super_class_obj, mbrs_struct, IOKitBaseClasse
             #    idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
             #    idaapi.set_member_tinfo(mbrs_struct, base_ptr, 0, tinfo, idaapi.TINFO_DEFINITE)
         else:
-            child_sz = super_class_obj.classSize - 8
+            child_sz = class_obj.getSize() - 8
             padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
 
         if parent_class_name in list(class_dict.keys()):
-            child_sz = super_class_obj.getSize()
+            child_sz = class_obj.getSize()
             parent_sz = class_dict[parent_class_name].getSize()
-            adding_size = (child_sz - 8) - (parent_sz - 8)
+            adding_size = (child_sz - 8)
 
             #if adding_size > 2:
             padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
-            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, adding_size)   
+            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, adding_size-2)   
             padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1) 
         else:
-            child_sz = super_class_obj.getSize() - 8
+            child_sz = class_obj.getSize() - 8
+            padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
             padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
-
-
+            padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1) 
+"""
+------/ struct_alignment /------
+Description: Sets the alignment of the structure
+struc_name: The name of the structure to set the alignment for
+"""
 def struct_alignment(struc_name):
     struc_id = idaapi.get_struc_id(struc_name)
     struc_obj = idaapi.get_struc(struc_id)
     #struc_obj.atyp = 0x8
     return ida_struct.set_struc_align(struc_obj, 3)
 
-#tuple structure of name: (ea, name)
+"""
+------/ create_structs /------
+Description: Creates the structures for each class
+class_dict: The dictionary of classes
+inherits_dict: The dictionary of classes that inherit from other classes
+"""
 def create_structs(class_dict, inherits_dict):
+    #---/ Vtable Parsing /---
     vtab_decls = {} #stores the function name and type in list format [func_type, func_name] 
     vtab_size = {} #used to store the size of each vtable
-    ea = 0
-    for name in idautils.Names():
-        vtab_name = idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)) if idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)) != None else name[1]
-        if "vtable for" in vtab_name and vtab_name != None and "::metaclass" not in vtab_name.lower() and (ida_name.is_public_name(name[0])): # or constructor in Names()): 
-            vtab_name = vtab_name.replace("`","").replace("vtable for", "").replace("'","")
-            print(vtab_name)
-            vtab_decls[vtab_name] = []
-            vtab_size[vtab_name] = 0
-            true_addr = name[0] + 16
-            ea = ida_bytes.get_qword(true_addr) 
-            vtab_decls[vtab_name].append([get_type(ea), idc.demangle_name(get_name(ea), idc.get_inf_attr(idc.INF_LONG_DN)), ea])
-            print("True Addr: ", hex(true_addr), "ea: ", (ea), "size: ", vtab_size[vtab_name])
-            while ida_bytes.get_qword(true_addr+8) != 0:
-                true_addr+=8
-                ea = ida_bytes.get_qword(true_addr)
-                vtab_size[vtab_name]+=8
-                print("True Addr: ", hex(true_addr), "ea: ", (ea), "size: ", vtab_size[vtab_name])
-                vtab_decls[vtab_name].append([get_type(ida_bytes.get_qword(true_addr)), idc.demangle_name(get_name(ida_bytes.get_qword(true_addr)), idc.get_inf_attr(idc.INF_LONG_DN)), ea])
-            vtab_size[vtab_name]-=4
-        elif "vtable for" in vtab_name and vtab_name != None and "::metaclass" not in vtab_name.lower() and ida_name.is_public_name(name[0]) == False: #and constructor not in Names():
-            vtab_name = vtab_name.replace("`","").replace("vtable for", "").replace("'","")
-            vtab_decls[vtab_name] = []
-            vtab_size[vtab_name] = 0
-            if idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)):
-                print(name[0],idc.demangle_name(name[1], True), "We out here!\n")
-                true_addr = ida_bytes.get_qword(name[0]) if ida_bytes.get_qword(name[0]) != 0 else name[0]
-                true_addr+=16
-                print(true_addr)
-                while ida_bytes.get_qword(true_addr+8) != 0:
-                    ea = ida_bytes.get_qword(true_addr)
-                    vtab_size[vtab_name]+=8
-                    vtab_decls[vtab_name].append([get_type(ida_bytes.get_qword(true_addr)), idc.demangle_name(get_name(ida_bytes.get_qword(true_addr)), idc.get_inf_attr(idc.INF_LONG_DN)), ea])
-                    true_addr+=8
-                vtab_size[vtab_name]-=4
+    ea = 0 #used to store the address of the vtable
+    for name in idautils.Names(): #iterate through all the names in the binary
+        vtab_name = idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)) if idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)) != None else name[1] #grab the name of the vtable, demangle it if possible
+        if "vtable for" in vtab_name and vtab_name != None and "::metaclass" not in vtab_name.lower() and (ida_name.is_public_name(name[0])): #if the name is a vtable and is public
+            vtab_name = vtab_name.replace("`","").replace("vtable for", "").replace("'","") #clean up the name
+            print(vtab_name) #debugging purposes
+            vtab_decls[vtab_name] = [] #create a list for the vtable
+            vtab_size[vtab_name] = 0 #set the size of the vtable to 0
+            true_addr = name[0] + 16 #set the true address of the vtable, 16 bytes after the start because there is 0x10 bytes of nothing
+            ea = ida_bytes.get_qword(true_addr) #grab the address of the first function in the vtable
+            vtab_decls[vtab_name].append([get_type(ea), idc.demangle_name(get_name(ea), idc.get_inf_attr(idc.INF_LONG_DN)), ea]) #add a list to the vtab_decl dict with this format: [func_type, func_name, ea]
+            print("True Addr: ", hex(true_addr), "ea: ", (ea), "size: ", vtab_size[vtab_name]) #debugging purposes
+            while ida_bytes.get_qword(true_addr+8) != 0: #while the next function in the vtable is not null
+                true_addr+=8 #increment the true address by 8
+                ea = ida_bytes.get_qword(true_addr) #grab the address of the next function
+                vtab_size[vtab_name]+=8 #increment the size of the vtable by 8
+                print("True Addr: ", hex(true_addr), "ea: ", (ea), "size: ", vtab_size[vtab_name]) #debugging purposes
+                vtab_decls[vtab_name].append([get_type(ida_bytes.get_qword(true_addr)), idc.demangle_name(get_name(ida_bytes.get_qword(true_addr)), idc.get_inf_attr(idc.INF_LONG_DN)), ea]) #add a list holding the data of the function to the vtab_decl dict with this format: [func_type, func_name, ea]
+            vtab_size[vtab_name]-=4 #decrement the size of the vtable by 4 
+        elif "vtable for" in vtab_name and vtab_name != None and "::metaclass" not in vtab_name.lower() and ida_name.is_public_name(name[0]) == False: #if the name is a vtable and is not public 
+            vtab_name = vtab_name.replace("`","").replace("vtable for", "").replace("'","") #clean up the name
+            vtab_decls[vtab_name] = [] #create a list for the vtable
+            vtab_size[vtab_name] = 0 #set the size of the vtable to 0
+            if idc.demangle_name(name[1], idc.get_inf_attr(idc.INF_LONG_DN)): #if the name can be demangled
+                print(name[0],idc.demangle_name(name[1], True), "We out here!\n") #debugging purposes
+                true_addr = ida_bytes.get_qword(name[0]) if ida_bytes.get_qword(name[0]) != 0 else name[0] #set the true address of the vtable, 16 bytes after the start because there is 0x10 bytes of nothing
+                true_addr+=16 #set the true address of the vtable, 16 bytes after the start because there is 0x10 bytes of nothing
+                print(true_addr) #debugging purposes
+                while ida_bytes.get_qword(true_addr+8) != 0: #while the next function in the vtable isn't null
+                    ea = ida_bytes.get_qword(true_addr) #grab the address of the function
+                    vtab_size[vtab_name]+=8 #increase the size of the vtable by 8
+                    vtab_decls[vtab_name].append([get_type(ida_bytes.get_qword(true_addr)), idc.demangle_name(get_name(ida_bytes.get_qword(true_addr)), idc.get_inf_attr(idc.INF_LONG_DN)), ea]) #add a list holding the data of the function to the vtab_decl dict with this format: [func_type, func_name, ea]
+                    true_addr+=8 #increment the true address by 8
+                vtab_size[vtab_name]-=4 
             print("\n"*30)
+    #---/ Struct Creation /---
     for key in class_dict:
-        if "<" in key and ">" in key:
-            continue
-        prev_defined.append(key)
-        curr_members = {}
+        if "<" in key and ">" in key: #if the key is a template
+            continue #skip it
+        prev_defined.append(key) #add key to previously defined list
+        curr_members = {} #create dict for current members, used to check if a member has already been defined to avoid naming conflicts
         offset = 16
-        struct_name = key
+        struct_name = key #set the struct name to the key, kinda redundant but whatever
         #if struct_name not in IOKitBaseClasses:
-        add_struc(-1, struct_name, False) 
-        add_struc(-1, struct_name+"_vtbl", False)
-        fields_name = f"{struct_name}_mbrs"
-        add_struc(-1, fields_name, False)
+        add_struc(-1, struct_name, False) #add the base class struct 
+        add_struc(-1, struct_name+"_vtbl", False) #add the vtable struct
+        fields_name = f"{struct_name}_mbrs" #define the mbrs struct name 
+        add_struc(-1, fields_name, False) #add the mmbrs struct 
         #fields_name = f"{struct_name}_mbrs;"
-        idc.set_local_type(-1, "struct "+fields_name+";", idaapi.PT_SIL)
+        idc.set_local_type(-1, "struct "+fields_name+";", idaapi.PT_SIL) #create type of the mbrs struct to avoid type errors
         #struct_alignment(struct_name)
         #struct_alignment(struct_name+"_vtbl")
         #struct_alignment(struct_name+"_mbrs")
-        struc = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_vtbl"))
-        class_struc = idaapi.get_struc(idaapi.get_struc_id(struct_name)) 
-        mbrs_struct = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_mbrs"))
-        if key not in list(vtab_decls.keys()):
-            print("Here OwO")
+        struc = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_vtbl")) #get the vtable struct, horrible naming because it is a vtable struct
+        class_struc = idaapi.get_struc(idaapi.get_struc_id(struct_name)) #get the base class struct
+        mbrs_struct = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_mbrs")) #get the mbrs struct
+        if key not in list(vtab_decls.keys()): #if the key is not in the vtab_decls dictionary, than it doesn't have vtable information
+            print("Here OwO") #debugging purposes
             add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
-            struct_member = idaapi.get_member_by_name(struc, "thisOffset") 
-            tinfo = idaapi.tinfo_t()
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL)
-            idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE)
+            struct_member = idaapi.get_member_by_name(struc, "thisOffset") #get the struct member thisOffset
+            tinfo = idaapi.tinfo_t() #create tinfo_t object
+            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL) #parse the decleration of the thisOffset member, PT_SIL is used to silence potential errors
+            idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE) #set the tinfo of the thisOffset member  
             add_member = idaapi.add_struc_member(struc, "rtti", 8, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the runtime type information 
-            struct_member = idaapi.get_member_by_name(struc, "rtti")
-            tinfo = idaapi.tinfo_t()
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL)
-            idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE)
+            struct_member = idaapi.get_member_by_name(struc, "rtti") #get the member rtti 
+            tinfo = idaapi.tinfo_t() #create tinfo_t object
+            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL) #parse decleration for rtti member 
+            idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE) #set member type info for rtti
             class_obj = class_dict[struct_name] #Get the current class object
             super_class_name = class_obj.getSuperClass() #get super class name
             super_class_obj = class_dict[super_class_name] if (super_class_name in list(class_dict.keys())) else "" #given super class name, get the obj for the super class
@@ -804,10 +854,10 @@ def create_structs(class_dict, inherits_dict):
             #    mbrs_size = (class_dict[struct_name].getSize()) + (class_dict[super_class_name].getSize())
             #elif struct_name in list(class_dict.keys()):
             #    mbrs_size = class_dict[struct_name].getSize()
-            if super_class_name in list(class_dict.keys()):
-                mbrs_size = (class_dict[struct_name].getSize()) + (class_dict[super_class_name].getSize())
-            else:
-                mbrs_size = class_dict[struct_name].getSize()
+            #if super_class_name in list(class_dict.keys()):
+            #    mbrs_size = (class_dict[struct_name].getSize()-8) + (class_dict[super_class_name].getSize()-8)
+            #else:
+            mbrs_size = class_dict[struct_name].getSize()-8
             idaapi.add_struc_member(class_struc, "mbrs", idaapi.BADADDR, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
             if not mbr_struc_member:
@@ -829,10 +879,10 @@ def create_structs(class_dict, inherits_dict):
             if super_class_obj != "" and super_class_obj != None: 
                handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses) 
 
-    #for key in class_dict:
-    #    struct_alignment(key)
-    #    struct_alignment(key + "_vtbl")
-    #    struct_alignment(key + "_mbrs")
+    for key in class_dict:
+        struct_alignment(key)
+        struct_alignment(key + "_vtbl")
+        struct_alignment(key + "_mbrs")
  
 
 
@@ -866,29 +916,52 @@ def entry():
     osmeta = get_osmeta_constructor()
     refs = idautils.XrefsTo(osmeta)
     for ref in refs:
-        if ida_funcs.get_func(ref.frm) != None and get_name(ref.frm) != "": 
-            print("Ref: ",ref.frm)
-            args = unicorn_emulate(ref.frm)
-            strType = idc.get_str_type(args[0])
-            parent = idc.demangle_name(idaapi.get_name(args[1]), idc.get_inf_attr(idc.INF_LONG_DN)) if args[1] != 0x0 else ""
-            className = str(idc.get_strlit_contents(args[0], strtype = strType))
-            metaclassAddr = hex(args[1])
-            classSize = hex(args[2])
-            # parent not in inherits and parent != None
-            if className not in existing_classes:
-                classes.append(IOClass(className, parent, classSize))
-                existing_classes.append(className)
-                classes_dict[className] = [args[1], args[2]]
-                deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, parent, args[2])
-            if parent not in inherits and parent != None:
-                inherits[parent.split("::")[0]] = {}
-            if parent != None and parent.split("::")[0] in inherits.keys():
-                inherits[parent.split("::")[0]][className] = {}
-            if metaclassAddr == 0x0:
-                deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, parent, args[2])
-                inherits[className] = {}
+        if ida_funcs.get_func(ref.frm) != None and demangle_name(get_func_name(ref.frm), True): 
+            if "~" not in demangle_name(get_func_name(ref.frm), True):
+                print("Ref: ",ref.frm)
+                args = unicorn_emulate(ref.frm)
+                if args == 0:
+                    continue
+                strType = idc.get_str_type(args[0])
+                print(f"className: {args[0]}\nsuperClass: {args[1]}\nclassSize: {args[2]}\n")
+                if idc.demangle_name(idaapi.get_name(args[1]), idc.get_inf_attr(idc.INF_LONG_DN)) != None:
+                    parent = idc.demangle_name(idaapi.get_name(args[1]), idc.get_inf_attr(idc.INF_LONG_DN)).split("::")[0]
+                else:
+                    parent = ""
+                className = str(idc.get_strlit_contents(args[0], strtype = strType))
+                metaclassAddr = hex(args[1])
+                classSize = int(args[2])
+                # parent not in inherits and parent != None
+                #if parent not in inherits and parent != None and className not in existing_classes: 
+                #    inherits[parent.split("::")[0]] = {}
+                #    classes.append(IOClass(className, parent, classSize))
+                #    existing_classes.append(className)
+                #    classes_dict[className] = [args[1], args[2]]
+                #    deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, parent, args[2])
+                #elif parent != None and parent.split("::")[0] in inherits.keys():
+                #    inherits[parent.split("::")[0]][className] = {}
+                #elif metaclassAddr == "0x0":
+                #    deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, "", args[2])
+                #    inherits[className] = {}
+            #else:
+                #pass
+                if className not in existing_classes:
+                    classes.append(IOClass(className, parent, classSize))
+                    existing_classes.append(className)
+                    classes_dict[className] = [args[1], args[2]]
+                    deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, parent, int(classSize))
+                if parent not in inherits and parent != None:
+                    inherits[parent.split("::")[0]] = {}
+                if parent != None and parent.split("::")[0] in inherits.keys():
+                    inherits[parent.split("::")[0]][className] = {}
+                if metaclassAddr == "0x0":
+                    deprecated_class_dict[className[1:].replace("`","").replace("'","")] = IOClass(className, parent, int(classSize))
+                    inherits[className] = {}
+            else:
+                pass
         else:
             pass
+
     inherits_dict = {}
     for key in inherits.keys():
         if bool(inherits[key]):
@@ -929,6 +1002,7 @@ def entry():
         superclass_name = deprecated_class_dict[key].getSuperClass().split("::")[0] if deprecated_class_dict[key].getSuperClass() != None else ""
         deprecated_class_dict[key].setName(class_name)
         deprecated_class_dict[key].setSuperClass(superclass_name)
+    print(deprecated_class_dict)
     create_structs(deprecated_class_dict, inherits)
 
 entry()
