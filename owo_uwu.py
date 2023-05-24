@@ -554,9 +554,10 @@ IOKitBaseClasses: The list of base classes **DEPRECATED**
 depth: The depth of the hierarchy **DEPRECATED** 
 """
 def handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses, depth=0):
+    class_dict_list = list(class_dict.keys())
     for class_name in class_dict.keys():
         super_class = class_dict[class_name].getSuperClass()
-        if super_class in list(class_dict.keys()):
+        if super_class in class_dict_list: 
             class_dict[class_name].classSizeInheritance = class_dict[super_class].getSize() + class_dict[class_name].getSize()
 
     if class_obj:
@@ -581,8 +582,8 @@ def handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses, dep
         #    child_sz = class_obj.getSize() - 8
         #    padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
 
-        if parent_class_name in list(class_dict.keys()):
-            idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize()-8)
+        if parent_class_name in class_dict_list: 
+            idaapi.add_struc_member(mbrs_struct, "base_class_ptr", 0, idc.FF_QWORD, None, class_dict[parent_class_name].getSize())
             base_ptr = idaapi.get_member_by_name(mbrs_struct, "base_class_ptr")
             base_class_decl = f"{parent_class_name}_mbrs base_class_ptr;"
             idaapi.parse_decl(tinfo, til, base_class_decl, idaapi.PT_SIL)
@@ -590,16 +591,16 @@ def handle_super_class(class_dict, class_obj, mbrs_struct, IOKitBaseClasses, dep
 
             child_sz = class_obj.getSize()
             parent_sz = class_dict[parent_class_name].getSize()
-            adding_size = (child_sz - 8)
+            adding_size = child_sz
 
             #if adding_size > 2:
             padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
-            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, adding_size-2)   
+            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, adding_size - 2)   
             padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1) 
         else:
-            child_sz = class_obj.getSize() - 8
+            child_sz = class_obj.getSize()
             padding_var_start = idaapi.add_struc_member(mbrs_struct, "padding_start_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1)
-            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz)
+            padding_var = idaapi.add_struc_member(mbrs_struct, "__padding", idaapi.BADADDR, idc.FF_DATA, None, child_sz - 2)
             padding_var_end = idaapi.add_struc_member(mbrs_struct, "padding_end_guard", idaapi.BADADDR, idc.FF_BYTE, None, 1) 
 """
 ------/ struct_alignment /------
@@ -621,6 +622,7 @@ inherits_dict: The dictionary of classes that inherit from other classes
 def create_structs(class_dict, inherits_dict):
     #---/ Vtable Parsing /---
     vtab_decls = {} #stores the function name and type in list format [func_type, func_name] 
+    class_dict_keys = list(class_dict.keys())
     vtab_size = {} #used to store the size of each vtable
     ea = 0 #used to store the address of the vtable
     for name in idautils.Names(): #iterate through all the names in the binary
@@ -658,6 +660,7 @@ def create_structs(class_dict, inherits_dict):
                 vtab_size[vtab_name]-=4 
             #print("\n"*30)
     #---/ Struct Creation /---
+    vtab_decls_keys = list(vtab_decls.keys())
     for key in class_dict:
         if "<" in key and ">" in key: #if the key is a template
             continue #skip it
@@ -678,18 +681,18 @@ def create_structs(class_dict, inherits_dict):
         struc = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_vtbl")) #get the vtable struct, horrible naming because it is a vtable struct
         class_struc = idaapi.get_struc(idaapi.get_struc_id(struct_name)) #get the base class struct
         mbrs_struct = idaapi.get_struc(idaapi.get_struc_id(struct_name+"_mbrs")) #get the mbrs struct
-        if key not in list(vtab_decls.keys()): #if the key is not in the vtab_decls dictionary, than it doesn't have vtable information
+        if key not in vtab_decls_keys: #if the key is not in the vtab_decls dictionary, than it doesn't have vtable information
             #print("Here OwO") #debugging purposes
-            add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
-            struct_member = idaapi.get_member_by_name(struc, "thisOffset") #get the struct member thisOffset
-            tinfo = idaapi.tinfo_t() #create tinfo_t object
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL) #parse the decleration of the thisOffset member, PT_SIL is used to silence potential errors
-            idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE) #set the tinfo of the thisOffset member  
-            add_member = idaapi.add_struc_member(struc, "rtti", 8, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the runtime type information 
-            struct_member = idaapi.get_member_by_name(struc, "rtti") #get the member rtti 
-            tinfo = idaapi.tinfo_t() #create tinfo_t object
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL) #parse decleration for rtti member 
-            idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE) #set member type info for rtti
+            #add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
+            #struct_member = idaapi.get_member_by_name(struc, "thisOffset") #get the struct member thisOffset
+            #tinfo = idaapi.tinfo_t() #create tinfo_t object
+            #idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL) #parse the decleration of the thisOffset member, PT_SIL is used to silence potential errors
+            #idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE) #set the tinfo of the thisOffset member  
+            #add_member = idaapi.add_struc_member(struc, "rtti", 8, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the runtime type information 
+            #struct_member = idaapi.get_member_by_name(struc, "rtti") #get the member rtti 
+            #tinfo = idaapi.tinfo_t() #create tinfo_t object
+            #idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL) #parse decleration for rtti member 
+            #idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE) #set member type info for rtti
             class_obj = class_dict[struct_name] #Get the current class object
             super_class_name = class_obj.getSuperClass() #get super class name
             super_class_obj = class_dict[super_class_name] if (super_class_name in list(class_dict.keys())) else "" #given super class name, get the obj for the super class
@@ -724,16 +727,16 @@ def create_structs(class_dict, inherits_dict):
             index = idc.set_local_type(-1, local_type_details, ida_typeinf.PT_SIL)
             tinfo = idaapi.tinfo_t()
             til = idaapi.cvar.idati
-            add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
-            struct_member = idaapi.get_member_by_name(struc, "thisOffset") 
-            tinfo = idaapi.tinfo_t()
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL)
-            idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE)
-            add_member = idaapi.add_struc_member(struc, "rtti", 8, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the runtime type information 
-            struct_member = idaapi.get_member_by_name(struc, "rtti")
-            tinfo = idaapi.tinfo_t()
-            idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL)
-            idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE)
+            #add_member = idaapi.add_struc_member(struc, "thisOffset", 0, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the this ptr 
+            #struct_member = idaapi.get_member_by_name(struc, "thisOffset") 
+            #tinfo = idaapi.tinfo_t()
+            #idaapi.parse_decl(tinfo, idaapi.cvar.idati, "__int64 thisOffset;", idaapi.PT_SIL)
+            #idaapi.set_member_tinfo(struc, struct_member, 0, tinfo, idaapi.TINFO_DEFINITE)
+            #add_member = idaapi.add_struc_member(struc, "rtti", 8, idc.FF_QWORD, None, 8) #Creates a struct member in the vtable struct for the runtime type information 
+            #struct_member = idaapi.get_member_by_name(struc, "rtti")
+            #tinfo = idaapi.tinfo_t()
+            #idaapi.parse_decl(tinfo, idaapi.cvar.idati, "void* rtti;", idaapi.PT_SIL)
+            #idaapi.set_member_tinfo(struc, struct_member, 8, tinfo, idaapi.TINFO_DEFINITE)
             for func in vtab_decls[key]:
                 func_type = parse_func(func)
                 #print("Func Type: ", func_type)
@@ -842,7 +845,7 @@ def create_structs(class_dict, inherits_dict):
             class_obj = class_dict[struct_name] #Get the current class object
             super_class_name = class_obj.getSuperClass() #get super class name
             super_class_obj = ""
-            if super_class_name in list(class_dict.keys()):
+            if super_class_name in class_dict_keys: 
                 super_class_obj = class_dict[super_class_name]
             #super_class_obj = class_dict[super_class_name] if super_class_name in list(class_dict.keys()) else "" #given super class name, get the obj for the super class
             idaapi.add_struc_member(class_struc, "__vftable", 0, idc.FF_QWORD, None, 8) #create a struct member for the vtable
@@ -863,7 +866,7 @@ def create_structs(class_dict, inherits_dict):
             #if super_class_name in list(class_dict.keys()):
             #    mbrs_size = (class_dict[struct_name].getSize()-8) + (class_dict[super_class_name].getSize()-8)
             #else:
-            mbrs_size = class_dict[struct_name].getSize()-8
+            mbrs_size = class_dict[struct_name].getSize()
             idaapi.add_struc_member(class_struc, "mbrs", idaapi.BADADDR, idc.FF_QWORD, None, mbrs_size)
             mbr_struc_member = idaapi.get_member_by_name(class_struc, "mbrs")
             #if not mbr_struc_member:
