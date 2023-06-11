@@ -1,7 +1,7 @@
 # IDA_iOSkcache_destroyer
 vtabstrucyuwu, the destroyer of iOS kernelcaches
 
-# DISCLAIMER, This only works on kernelcaches that are symbolized, so anything iOS 16 and up, or if you have an illegal kernel that was symbolized in the past, you can use it there too :p 
+# DISCLAIMER, This only works on kernelcaches that are symbolized, so anything iOS 16 and up, or if you have an illegal kernel that was symbolized in the past, you can use it there too :p ALSO please delete all base IOKit classes defined by IDA such as OSMetaClass, IOMemoryDescriptor, with their vtbl_layouts, etc etc in the structs panel or it will break the inheritance chain.
 
 # What is it?
 - an IDAPython script that creates structures based on rtti from the kernelcache, generating class info, and recovering vtables that **INHERIT FROM OSMetaClassBase** (I will not figure out how to get vtable information and class info from classes that don't inherit from it, if you want that information, look for a function that creates an object of the class you want to recover, and reconstruct it yourself! It's easy pz promise <3)
