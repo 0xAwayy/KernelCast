@@ -1,5 +1,4 @@
-# IDA_iOSkcache_destroyer
-vtabstrucyuwu, the destroyer of iOS kernelcaches
+# IOKit Class Hierarchy Renconstruction Script
 
 # DISCLAIMER, This only works on kernelcaches that are symbolized, so anything iOS 16 and up, or if you have an illegal kernel that was symbolized in the past, you can use it there too :p ALSO please delete all base IOKit classes defined by IDA such as OSMetaClass, IOMemoryDescriptor, with their vtbl_layouts, etc etc in the structs panel or it will break the inheritance chain.
 
